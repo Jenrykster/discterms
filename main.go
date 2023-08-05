@@ -13,9 +13,17 @@ import (
 )
 
 var (
-	Token   string
-	OwnerId string
+	Token           string
+	OwnerId         string
+	GuildID         string
+	ChannelID       string
+	MessageTemplate string
 )
+
+type UIHandler interface {
+	ShowMessage(m *discordgo.MessageCreate)
+	HandleInput(m *MessageUtils)
+}
 
 func init() {
 	err := godotenv.Load()
@@ -23,10 +31,11 @@ func init() {
 		log.Fatal(err)
 	}
 
-	envToken, _ := os.LookupEnv("TOKEN")
-	flag.StringVar(&Token, "t", envToken, "Bot Token")
-	envOwnerId, _ := os.LookupEnv("OWNER_ID")
-	flag.StringVar(&OwnerId, "id", envOwnerId, "Bot owner's ID")
+	loadEnv(&Token, "TOKEN", "t", "Bot Token")
+	loadEnv(&OwnerId, "OWNER_ID", "id", "Bot owner's ID")
+	loadEnv(&GuildID, "GUILD_ID", "gid", "The ID of the discord server where this bot will act")
+	loadEnv(&ChannelID, "CHANNEL_ID", "cid", "The ID of the channel where the messages will be sent")
+	loadEnv(&MessageTemplate, "MESSAGE_TEMPLATE", "tmpl", "A template string with a single %s where the message will be inserted")
 	flag.Parse()
 
 	if len(Token) == 0 || len(OwnerId) == 0 {
@@ -34,24 +43,36 @@ func init() {
 	}
 }
 
+func loadEnv(target *string, key string, short string, use string) {
+	envValue, _ := os.LookupEnv(key)
+	flag.StringVar(target, key, envValue, use)
+}
+
 func main() {
 	dg, err := discordgo.New("Bot " + Token)
 	if err != nil {
-		fmt.Println("error creating Discord session,", err)
+		fmt.Println("ERR: couldn't create discord session. cause:", err)
 		return
 	}
 
-	dg.AddHandler(messageCreate)
+	// Init UI dependency
+	uiHandler := BasicUiHandler{}
+	messagUtils := CreateMessageUtils(GuildID, ChannelID, MessageTemplate, dg)
+
+	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+		messageCreate(uiHandler, s, m)
+	})
 
 	dg.Identify.Intents = discordgo.IntentGuildMessages
 
 	err = dg.Open()
 	if err != nil {
-		fmt.Println("error opening connection,", err)
+		fmt.Println("ERR: couldn't open session. cause: ", err)
 		return
 	}
 
-	fmt.Println("Bot is running.")
+	go handleInput(uiHandler, dg, &messagUtils)
+
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
@@ -59,14 +80,17 @@ func main() {
 	dg.Close()
 }
 
-func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+func handleInput(uiHandler UIHandler, s *discordgo.Session, m *MessageUtils) {
+	uiHandler.HandleInput(m)
+}
 
+func messageCreate(uiHandler UIHandler, s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
 
 	if mentionsOwnerOrBot(s.State.User.ID, m) {
-		log.Println(m.Content)
+		uiHandler.ShowMessage(m)
 	}
 }
 
