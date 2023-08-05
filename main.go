@@ -56,11 +56,11 @@ func main() {
 	}
 
 	// Init UI dependency
-	uiHandler := BasicUiHandler{}
+	uiHandler := CreateCharmUiHandler()
 	messagUtils := CreateMessageUtils(GuildID, ChannelID, MessageTemplate, dg)
 
 	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		messageCreate(uiHandler, s, m)
+		messageCreate(&uiHandler, s, m)
 	})
 
 	dg.Identify.Intents = discordgo.IntentGuildMessages
@@ -71,7 +71,7 @@ func main() {
 		return
 	}
 
-	go handleInput(uiHandler, dg, &messagUtils)
+	go handleInput(&uiHandler, dg, &messagUtils)
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
